@@ -83,7 +83,8 @@ apiClient.interceptors.response.use(
     }
     
     // Log error for debugging
-    if (process.env.NODE_ENV === 'development') {
+    if (process.env.NODE_ENV === 'development') {
+      console.error({
         url: error.config?.url,
         method: error.config?.method,
         status: error.response?.status,

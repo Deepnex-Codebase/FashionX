@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import DashboardHeader from '../../components/dashboard/DashboardHeader';
 import Sidebar from '../../components/dashboard/Sidebar';
-import DashboardErrorBoundary from '../../components/dashboard/DashboardErrorBoundary';
+import DashboardErrorBoundary from '@/components/dashboard/DashboardErrorBoundary';
 // ToastContainer is handled in ClientLayout
 
 export default function Dashboard() {

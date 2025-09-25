@@ -398,7 +398,7 @@ export default function AdminDashboard() {
               <KPICard 
                 title="Images Generated" 
                 value={analytics.mediaGenerated?.images || 0} 
-                icon={<Image className="h-6 w-6 text-white" />} 
+                icon={<Image className="h-6 w-6 text-white" alt="Images icon" />} 
                 color="bg-[#26140c]" 
               />
               <KPICard 

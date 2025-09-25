@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { getUserData, getAuthToken, setUserData } from '../lib/cookieUtils';
 
 const CreditContext = createContext();
@@ -17,7 +17,7 @@ export const CreditProvider = ({ children }) => {
   const [error, setError] = useState(null);
 
   // Function to fetch credits from user data
-  const fetchCredits = async () => {
+  const fetchCredits = useCallback(async () => {
     try {
       setLoading(true);
       const userData = getUserData();
@@ -39,12 +39,13 @@ export const CreditProvider = ({ children }) => {
         // If no local data, fetch from API
         await fetchCreditsFromAPI();
       }
-    } catch (err) {
+    } catch (err) {
+
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // Function to fetch credits from API
   const fetchCreditsFromAPI = async () => {
@@ -82,7 +83,8 @@ export const CreditProvider = ({ children }) => {
       } else {
         throw new Error('Failed to fetch user data');
       }
-    } catch (err) {
+    } catch (err) {
+
       setError(err.message);
     }
   };
@@ -130,7 +132,7 @@ export const CreditProvider = ({ children }) => {
   // Initialize credits on mount
   useEffect(() => {
     fetchCredits();
-  }, []);
+  }, [fetchCredits]);
 
   // Listen for storage changes (when user data is updated in other tabs)
   useEffect(() => {
@@ -142,7 +144,7 @@ export const CreditProvider = ({ children }) => {
 
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
+  }, [fetchCredits]);
 
   const value = {
     credits,

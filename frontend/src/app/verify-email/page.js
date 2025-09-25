@@ -14,6 +14,20 @@ const VerifyEmailContent = () => {
   const [message, setMessage] = useState('Verifying your email...');
   const [countdown, setCountdown] = useState(5);
 
+  const startCountdown = React.useCallback((redirectUrl = '/?login=true') => {
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          // Redirect to login page
+          router.push(redirectUrl);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [router]);
+
   useEffect(() => {
     if (!token) {
       setVerificationStatus('error');
@@ -34,7 +48,7 @@ const VerifyEmailContent = () => {
           const redirectUrl = response.data.data?.redirectUrl || '/?login=true';
           startCountdown(redirectUrl);
         }
-      } catch (error) {
+      } catch (error) {
         setVerificationStatus('error');
         setMessage(error.response?.data?.message || 'Email verification failed. The link may be expired or invalid.');
       }
@@ -43,19 +57,7 @@ const VerifyEmailContent = () => {
     verifyEmail();
   }, [token, startCountdown]);
 
-  const startCountdown = (redirectUrl = '/?login=true') => {
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          // Redirect to login page
-          router.push(redirectUrl);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
+
 
   const handleLoginClick = () => {
     router.push('/?login=true');

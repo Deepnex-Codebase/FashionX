@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import ProtectedAdminRoute from '@/components/admin/ProtectedAdminRoute';
 import adminApi from '@/lib/adminApi';
@@ -46,7 +46,7 @@ export default function UsersManagement() {
   const [userId, setUserId] = useState(null);
 
   // Fetch users with current filters and pagination
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
       setLoading(true);
       // Create a clean copy of filters without empty values
@@ -101,12 +101,12 @@ export default function UsersManagement() {
       setError('Failed to load users. Please try again.');
       setLoading(false);
     }
-  };
+  }, [filters, pagination.page, pagination.limit, pagination]);
 
   // Initial data load
   useEffect(() => {
     fetchUsers();
-  }, [pagination.page, pagination.limit]);
+  }, [pagination.page, pagination.limit, fetchUsers]);
 
   // Handle filter changes
   const handleFilterChange = (e) => {
