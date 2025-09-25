@@ -101,7 +101,7 @@ export default function UsersManagement() {
       setError('Failed to load users. Please try again.');
       setLoading(false);
     }
-  }, [filters, pagination.page, pagination.limit, pagination]);
+  }, [filters, pagination]);
 
   // Initial data load
   useEffect(() => {
