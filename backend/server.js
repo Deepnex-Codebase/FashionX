@@ -38,11 +38,22 @@ app.use(compression());
 // Security middleware
 app.use(helmet());
 
-// Session middleware for passport
+// Configure session store
+const MongoStore = require('connect-mongo');
+
+// Session middleware for passport with MongoDB store
 app.use(session({
   secret: process.env.JWT_SECRET,
   resave: false,
   saveUninitialized: false,
+  store: MongoStore.create({
+    mongoUrl: process.env.MONGODB_URI,
+    ttl: 24 * 60 * 60, // 1 day in seconds
+    autoRemove: 'native',
+    touchAfter: 24 * 3600, // time period in seconds to update session
+    collectionName: 'sessions',
+    stringify: false
+  }),
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     maxAge: 24 * 60 * 60 * 1000 // 1 day
@@ -62,17 +73,6 @@ const authLimiter = rateLimit({
   }
 });
 app.use('/api/auth', authLimiter);
-
-// Session configuration
-app.use(session({
-  secret: process.env.JWT_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 24 * 60 * 60 * 1000 // 1 day
-  }
-}));
 
 // Initialize Passport
 app.use(passport.initialize());
@@ -99,7 +99,8 @@ app.use(cors({
     
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
-    } else {
+    } else {
+
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -117,7 +118,8 @@ app.use((req, res, next) => {
 
 // Request logging middleware
 if (process.env.NODE_ENV === 'development') {
-  app.use((req, res, next) => {
+  app.use((req, res, next) => {
+
     next();
   });
 }
@@ -170,18 +172,24 @@ const connectDB = require('./config/database');
 connectDB();
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, () => {
+
+
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  mongoose.connection.close(() => {
+process.on('SIGTERM', () => {
+
+  mongoose.connection.close(() => {
+
     process.exit(0);
   });
 });
 
-process.on('SIGINT', async () => {
-  await mongoose.connection.close();
+process.on('SIGINT', async () => {
+
+  await mongoose.connection.close();
+
   process.exit(0);
 });
 
