@@ -1,0 +1,942 @@
+const axios = require('axios');
+const User = require('../models/User');
+require('dotenv').config();
+
+/**
+ * @desc    Generate video from text
+ * @route   POST /api/video-edit/text-to-video
+ * @access  Private
+ */
+exports.textToVideo = async (req, res) => {
+  const { prompt } = req.body;
+  
+  // Check if user has enough credits
+  const user = await User.findById(req.user.id);
+  
+  if (!user) {
+    return res.status(404).json({
+      status: 'fail',
+      error: 'User not found'
+    });
+  }
+  
+  // Check if user has selected a plan
+  if (!user.plan) {
+    return res.status(403).json({
+      status: 'fail',
+      error: 'Please select a plan to generate videos',
+      redirectTo: '/pricing'
+    });
+  }
+  
+  // Check if user has enough credits
+  if (user.credits.balance <= 0) {
+    return res.status(403).json({
+      status: 'fail',
+      error: 'You have run out of credits. Please upgrade your plan.',
+      redirectTo: '/pricing'
+    });
+  }
+
+  // Validate input
+  if (!prompt) {
+    return res.status(400).json({ 
+      status: 'fail',
+      error: 'prompt is required' 
+    });
+  }
+
+  try {
+    // Get the webhook URL
+    const n8nWebhookUrl = process.env.WEBHOOK_TEXT_TO_VIDEO;
+    
+    if (!n8nWebhookUrl) {
+      return res.status(500).json({ 
+        status: 'fail',
+        error: 'Text to video webhook URL is not configured' 
+      });
+    }
+    
+    // Validate webhook URL format
+    try {
+      new URL(n8nWebhookUrl);
+    } catch (e) {
+
+      return res.status(500).json({ 
+        status: 'fail',
+        error: 'Invalid text to video webhook URL format' 
+      });
+    }
+
+    // Prepare webhook payload
+    const webhookPayload = {
+      prompt,
+      webhookType: 'text-to-video',
+      userId: req.user.id,
+      userEmail: user.email
+    };
+    
+    // Send request to n8n webhook
+
+
+    
+    const response = await axios.post(n8nWebhookUrl, webhookPayload, {
+      timeout: 180000, // wait up to 180 seconds for n8n response (videos take longer)
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+
+    
+    // Handle response data safely
+    let responseData;
+    try {
+      if (typeof response.data === 'string') {
+        // Check if response starts with "Internal S" (likely "Internal Server Error")
+        if (response.data.startsWith('Internal S')) {
+
+          responseData = { 
+            error: 'Internal Server Error from webhook',
+            message: response.data
+          };
+        } else {
+          // Try to parse as JSON, but handle any parsing errors
+          try {
+            responseData = JSON.parse(response.data);
+          } catch (jsonError) {
+
+            responseData = { 
+              error: 'Invalid JSON response',
+              rawResponse: response.data.substring(0, 200) // Include part of the raw response for debugging
+            };
+          }
+        }
+      } else {
+        responseData = response.data;
+      }
+
+    } catch (parseError) {
+
+      responseData = { 
+        error: 'Invalid response format',
+        message: parseError.message
+      };
+    }
+    
+    // Replace response.data with our safely parsed data
+    response.data = responseData;
+    
+    // Check if response data is valid
+    if (!response.data) {
+
+      return res.status(502).json({
+        status: 'fail',
+        error: 'Empty response from N8N webhook'
+      });
+    }
+    
+    // Handle the n8n webhook response format
+    let formattedData = response.data;
+    let videoUrl = null;
+    
+    // Check if response has the expected n8n format: {code, msg, data}
+    if (formattedData.code === 200 && formattedData.msg === 'success' && formattedData.data) {
+
+      
+      // Extract the actual data from n8n response
+      const n8nData = formattedData.data;
+      
+      // Parse resultJson if it's a string
+      if (n8nData.resultJson && typeof n8nData.resultJson === 'string') {
+        try {
+          const cleanJson = n8nData.resultJson.replace(/`/g, '');
+          const parsedResult = JSON.parse(cleanJson);
+          
+          // Extract video URL from resultUrls array
+          if (parsedResult.resultUrls && Array.isArray(parsedResult.resultUrls) && parsedResult.resultUrls.length > 0) {
+            videoUrl = parsedResult.resultUrls[0].replace(/`/g, '').trim();
+
+          }
+        } catch (e) {
+
+        }
+      }
+      
+      // Prepare the formatted response for frontend
+      formattedData = {
+        taskId: n8nData.taskId,
+        model: n8nData.model,
+        state: n8nData.state,
+        videoUrl: videoUrl,
+        costTime: n8nData.costTime,
+        completeTime: n8nData.completeTime,
+        createTime: n8nData.createTime
+      };
+    } else {
+      // Handle other response formats (legacy support)
+
+      
+      // If resultJson is a string, try to parse it
+      if (formattedData.resultJson && typeof formattedData.resultJson === 'string') {
+        try {
+          const cleanJson = formattedData.resultJson.replace(/`/g, '');
+          formattedData.resultJson = JSON.parse(cleanJson);
+        } catch (e) {
+
+        }
+      }
+      
+      // Extract video URL from various possible locations
+      if (formattedData.resultJson && formattedData.resultJson.videoUrl) {
+        videoUrl = formattedData.resultJson.videoUrl.replace(/`/g, '').trim();
+      } else if (formattedData.resultJson && formattedData.resultJson.resultUrls && Array.isArray(formattedData.resultJson.resultUrls)) {
+        videoUrl = formattedData.resultJson.resultUrls[0].replace(/`/g, '').trim();
+      } else if (formattedData.videoUrl) {
+        videoUrl = formattedData.videoUrl.replace(/`/g, '').trim();
+      } else if (formattedData.data && formattedData.data.videoUrl) {
+        videoUrl = formattedData.data.videoUrl.replace(/`/g, '').trim();
+      }
+    }
+    
+    if (!videoUrl) {
+
+
+    } else {
+
+    }
+    
+    // Prepare the response data for frontend
+    responseData = {
+      status: 'success',
+      data: {
+        ...formattedData,
+        videoUrl: videoUrl
+      }
+    };
+    
+    // Deduct credit and update user stats
+    user.credits.balance -= 1;
+    user.credits.totalUsed += 1;
+    
+    // Save generated video to user's history if we have a valid URL
+    if (videoUrl && videoUrl !== 'No result URL found') {
+      // Check if generatedVideos array exists, if not create it
+      if (!user.generatedVideos) {
+        user.generatedVideos = [];
+      }
+      
+      const videoData = {
+        id: `vid_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        videoUrl: videoUrl,
+        prompt: prompt,
+        type: 'text-to-video',
+        taskId: formattedData.taskId || null,
+        createdAt: new Date()
+      };
+      
+      // Add to user's generated videos array
+      user.generatedVideos.push(videoData);
+      
+      // Keep only last 50 videos to prevent database bloat
+      if (user.generatedVideos.length > 50) {
+        user.generatedVideos = user.generatedVideos.slice(-50);
+      }
+    }
+     
+    await user.save();
+    
+    // Add credit info to response
+    responseData.credits = {
+      remaining: user.credits.balance
+    };
+    
+    // Return the formatted response
+    return res.json(responseData);
+
+  } catch (err) {
+
+
+    
+    // Check if it's a timeout error
+    if (err.code === 'ECONNABORTED') {
+
+      return res.status(504).json({
+        status: 'fail',
+        error: 'N8N webhook request timed out. The video processing is taking too long.'
+      });
+    }
+    
+    // Check if it's a connection error
+    if (err.code === 'ECONNREFUSED') {
+
+      return res.status(502).json({
+        status: 'fail',
+        error: 'N8N webhook connection refused. The service might be down.'
+      });
+    }
+    
+    // Handle 404 errors specifically for n8n webhook
+    if (err.response?.status === 404) {
+
+      return res.status(502).json({
+        status: 'fail',
+        error: 'Video processing service is currently unavailable. Please try again later or contact support.',
+        hint: 'The n8n workflow may need to be activated. Please ensure the workflow is running.'
+      });
+    }
+    
+    // Provide more detailed error message
+    const errorMessage = err.response?.data?.error || 
+                         err.response?.statusText || 
+                         err.message || 
+                         'Failed to process video';
+    
+    const statusCode = err.response?.status || 500;
+    
+    return res.status(statusCode).json({ 
+      status: 'fail',
+      error: errorMessage,
+      details: err.response?.data || null 
+    });
+  }
+};
+
+/**
+ * @desc    Generate video from image
+ * @route   POST /api/video-edit/image-to-video
+ * @access  Private
+ */
+exports.imageToVideo = async (req, res) => {
+  const { prompt, image_url } = req.body;
+  
+  // Check if user has enough credits
+  const user = await User.findById(req.user.id);
+  
+  if (!user) {
+    return res.status(404).json({
+      status: 'fail',
+      error: 'User not found'
+    });
+  }
+  
+  // Check if user has selected a plan
+  if (!user.plan) {
+    return res.status(403).json({
+      status: 'fail',
+      error: 'Please select a plan to generate videos',
+      redirectTo: '/pricing'
+    });
+  }
+  
+  // Check if user has enough credits
+  if (user.credits.balance <= 0) {
+    return res.status(403).json({
+      status: 'fail',
+      error: 'You have run out of credits. Please upgrade your plan.',
+      redirectTo: '/pricing'
+    });
+  }
+
+  // Validate input
+  if (!prompt || !image_url) {
+    return res.status(400).json({ 
+      status: 'fail',
+      error: 'prompt and image_url are required' 
+    });
+  }
+  
+  // Validate image URL format
+  try {
+    new URL(image_url);
+  } catch (e) {
+
+    return res.status(422).json({ 
+      status: 'fail',
+      error: 'Invalid image URL format' 
+    });
+  }
+
+  try {
+    // Get the webhook URL
+    const n8nWebhookUrl = process.env.WEBHOOK_IMAGE_TO_VIDEO;
+    
+    if (!n8nWebhookUrl) {
+      return res.status(500).json({ 
+        status: 'fail',
+        error: 'Image to video webhook URL is not configured' 
+      });
+    }
+    
+    // Validate webhook URL format
+    try {
+      new URL(n8nWebhookUrl);
+    } catch (e) {
+
+      return res.status(500).json({ 
+        status: 'fail',
+        error: 'Invalid image to video webhook URL format' 
+      });
+    }
+
+    // Prepare webhook payload
+    const webhookPayload = {
+      prompt,
+      image_url,
+      webhookType: 'image-to-video',
+      userId: req.user.id,
+      userEmail: user.email
+    };
+    
+    // Send request to n8n webhook
+
+
+    
+    const response = await axios.post(n8nWebhookUrl, webhookPayload, {
+      timeout: 180000, // wait up to 180 seconds for n8n response (videos take longer)
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+
+    
+    // Handle response data safely
+    let responseData;
+    try {
+      if (typeof response.data === 'string') {
+        // Check if response starts with "Internal S" (likely "Internal Server Error")
+        if (response.data.startsWith('Internal S')) {
+
+          responseData = { 
+            error: 'Internal Server Error from webhook',
+            message: response.data
+          };
+        } else {
+          // Try to parse as JSON, but handle any parsing errors
+          try {
+            responseData = JSON.parse(response.data);
+          } catch (jsonError) {
+
+            responseData = { 
+              error: 'Invalid JSON response',
+              rawResponse: response.data.substring(0, 200) // Include part of the raw response for debugging
+            };
+          }
+        }
+      } else {
+        responseData = response.data;
+      }
+
+    } catch (parseError) {
+
+      responseData = { 
+        error: 'Invalid response format',
+        message: parseError.message
+      };
+    }
+    
+    // Replace response.data with our safely parsed data
+    response.data = responseData;
+    
+    // Check if response data is valid
+    if (!response.data) {
+
+      return res.status(502).json({
+        status: 'fail',
+        error: 'Empty response from N8N webhook'
+      });
+    }
+    
+    // Handle the n8n webhook response format
+    let formattedData = response.data;
+    let videoUrl = null;
+    
+    // Check if response has the expected n8n format: {code, msg, data}
+    if (formattedData.code === 200 && formattedData.msg === 'success' && formattedData.data) {
+
+      
+      // Extract the actual data from n8n response
+      const n8nData = formattedData.data;
+      
+      // Parse resultJson if it's a string
+      if (n8nData.resultJson && typeof n8nData.resultJson === 'string') {
+        try {
+          const cleanJson = n8nData.resultJson.replace(/`/g, '');
+          const parsedResult = JSON.parse(cleanJson);
+          
+          // Extract video URL from resultUrls array
+          if (parsedResult.resultUrls && Array.isArray(parsedResult.resultUrls) && parsedResult.resultUrls.length > 0) {
+            videoUrl = parsedResult.resultUrls[0].replace(/`/g, '').trim();
+
+          }
+        } catch (e) {
+
+        }
+      }
+      
+      // Prepare the formatted response for frontend
+      formattedData = {
+        taskId: n8nData.taskId,
+        model: n8nData.model,
+        state: n8nData.state,
+        videoUrl: videoUrl,
+        costTime: n8nData.costTime,
+        completeTime: n8nData.completeTime,
+        createTime: n8nData.createTime
+      };
+    } else {
+      // Handle other response formats (legacy support)
+
+      
+      // If resultJson is a string, try to parse it
+      if (formattedData.resultJson && typeof formattedData.resultJson === 'string') {
+        try {
+          const cleanJson = formattedData.resultJson.replace(/`/g, '');
+          formattedData.resultJson = JSON.parse(cleanJson);
+        } catch (e) {
+
+        }
+      }
+      
+      // Extract video URL from various possible locations
+      if (formattedData.resultJson && formattedData.resultJson.videoUrl) {
+        videoUrl = formattedData.resultJson.videoUrl.replace(/`/g, '').trim();
+      } else if (formattedData.resultJson && formattedData.resultJson.resultUrls && Array.isArray(formattedData.resultJson.resultUrls)) {
+        videoUrl = formattedData.resultJson.resultUrls[0].replace(/`/g, '').trim();
+      } else if (formattedData.videoUrl) {
+        videoUrl = formattedData.videoUrl.replace(/`/g, '').trim();
+      } else if (formattedData.data && formattedData.data.videoUrl) {
+        videoUrl = formattedData.data.videoUrl.replace(/`/g, '').trim();
+      }
+    }
+    
+    if (!videoUrl) {
+
+
+    } else {
+
+    }
+    
+    // Prepare the response data for frontend
+    responseData = {
+      status: 'success',
+      data: {
+        ...formattedData,
+        videoUrl: videoUrl
+      }
+    };
+    
+    // Deduct credit and update user stats
+    user.credits.balance -= 1;
+    user.credits.totalUsed += 1;
+    
+    // Save generated video to user's history if we have a valid URL
+    if (videoUrl && videoUrl !== 'No result URL found') {
+      // Check if generatedVideos array exists, if not create it
+      if (!user.generatedVideos) {
+        user.generatedVideos = [];
+      }
+      
+      const videoData = {
+        id: `vid_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        originalUrl: image_url,
+        videoUrl: videoUrl,
+        prompt: prompt,
+        type: 'image-to-video',
+        taskId: formattedData.taskId || null,
+        createdAt: new Date()
+      };
+      
+      // Add to user's generated videos array
+      user.generatedVideos.push(videoData);
+      
+      // Keep only last 50 videos to prevent database bloat
+      if (user.generatedVideos.length > 50) {
+        user.generatedVideos = user.generatedVideos.slice(-50);
+      }
+    }
+     
+    await user.save();
+    
+    // Add credit info to response
+    responseData.credits = {
+      remaining: user.credits.balance
+    };
+    
+    // Return the formatted response
+    return res.json(responseData);
+
+  } catch (err) {
+
+
+    
+    // Check if it's a timeout error
+    if (err.code === 'ECONNABORTED') {
+
+      return res.status(504).json({
+        status: 'fail',
+        error: 'N8N webhook request timed out. The video processing is taking too long.'
+      });
+    }
+    
+    // Check if it's a connection error
+    if (err.code === 'ECONNREFUSED') {
+
+      return res.status(502).json({
+        status: 'fail',
+        error: 'N8N webhook connection refused. The service might be down.'
+      });
+    }
+    
+    // Handle 404 errors specifically for n8n webhook
+    if (err.response?.status === 404) {
+
+      return res.status(502).json({
+        status: 'fail',
+        error: 'Video processing service is currently unavailable. Please try again later or contact support.',
+        hint: 'The n8n workflow may need to be activated. Please ensure the workflow is running.'
+      });
+    }
+    
+    // Provide more detailed error message
+    const errorMessage = err.response?.data?.error || 
+                         err.response?.statusText || 
+                         err.message || 
+                         'Failed to process video';
+    
+    const statusCode = err.response?.status || 500;
+    
+    return res.status(statusCode).json({ 
+      status: 'fail',
+      error: errorMessage,
+      details: err.response?.data || null 
+    });
+  }
+};
+
+/**
+ * @desc    Generate video from audio
+ * @route   POST /api/video-edit/audio-to-video
+ * @access  Private
+ */
+exports.audioToVideo = async (req, res) => {
+  const { prompt, image_url, audio_url } = req.body;
+  
+  // Check if user has enough credits
+  const user = await User.findById(req.user.id);
+  
+  if (!user) {
+    return res.status(404).json({
+      status: 'fail',
+      error: 'User not found'
+    });
+  }
+  
+  // Check if user has selected a plan
+  if (!user.plan) {
+    return res.status(403).json({
+      status: 'fail',
+      error: 'Please select a plan to generate videos',
+      redirectTo: '/pricing'
+    });
+  }
+  
+  // Check if user has enough credits
+  if (user.credits.balance <= 0) {
+    return res.status(403).json({
+      status: 'fail',
+      error: 'You have run out of credits. Please upgrade your plan.',
+      redirectTo: '/pricing'
+    });
+  }
+
+  // Validate input
+  if (!prompt || !image_url || !audio_url) {
+    return res.status(400).json({ 
+      status: 'fail',
+      error: 'prompt, image_url, and audio_url are required' 
+    });
+  }
+  
+  // Validate image URL format
+  try {
+    new URL(image_url);
+  } catch (e) {
+
+    return res.status(422).json({ 
+      status: 'fail',
+      error: 'Invalid image URL format' 
+    });
+  }
+  
+  // Validate audio URL format
+  try {
+    new URL(audio_url);
+  } catch (e) {
+
+    return res.status(422).json({ 
+      status: 'fail',
+      error: 'Invalid audio URL format' 
+    });
+  }
+
+  try {
+    // Get the webhook URL
+    const n8nWebhookUrl = process.env.WEBHOOK_SPEECH_TO_VIDEO;
+    
+    if (!n8nWebhookUrl) {
+      return res.status(500).json({ 
+        status: 'fail',
+        error: 'Speech to video webhook URL is not configured' 
+      });
+    }
+    
+    // Validate webhook URL format
+    try {
+      new URL(n8nWebhookUrl);
+    } catch (e) {
+
+      return res.status(500).json({ 
+        status: 'fail',
+        error: 'Invalid speech to video webhook URL format' 
+      });
+    }
+
+    // Prepare webhook payload
+    const webhookPayload = {
+      prompt,
+      image_url,
+      audio_url,
+      webhookType: 'audio-to-video',
+      userId: req.user.id,
+      userEmail: user.email
+    };
+    
+    // Send request to n8n webhook
+
+
+    
+    const response = await axios.post(n8nWebhookUrl, webhookPayload, {
+      timeout: 180000, // wait up to 180 seconds for n8n response (videos take longer)
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+
+    
+    // Handle response data safely
+    let responseData;
+    try {
+      if (typeof response.data === 'string') {
+        // Check if response starts with "Internal S" (likely "Internal Server Error")
+        if (response.data.startsWith('Internal S')) {
+
+          responseData = { 
+            error: 'Internal Server Error from webhook',
+            message: response.data
+          };
+        } else {
+          // Try to parse as JSON, but handle any parsing errors
+          try {
+            responseData = JSON.parse(response.data);
+          } catch (jsonError) {
+
+            responseData = { 
+              error: 'Invalid JSON response',
+              rawResponse: response.data.substring(0, 200) // Include part of the raw response for debugging
+            };
+          }
+        }
+      } else {
+        responseData = response.data;
+      }
+
+    } catch (parseError) {
+
+      responseData = { 
+        error: 'Invalid response format',
+        message: parseError.message
+      };
+    }
+    
+    // Replace response.data with our safely parsed data
+    response.data = responseData;
+    
+    // Check if response data is valid
+    if (!response.data) {
+
+      return res.status(502).json({
+        status: 'fail',
+        error: 'Empty response from N8N webhook'
+      });
+    }
+    
+    // Handle the n8n webhook response format
+    let formattedData = response.data;
+    let videoUrl = null;
+    
+    // Check if response has the expected n8n format: {code, msg, data}
+    if (formattedData.code === 200 && formattedData.msg === 'success' && formattedData.data) {
+
+      
+      // Extract the actual data from n8n response
+      const n8nData = formattedData.data;
+      
+      // Parse resultJson if it's a string
+      if (n8nData.resultJson && typeof n8nData.resultJson === 'string') {
+        try {
+          const cleanJson = n8nData.resultJson.replace(/`/g, '');
+          const parsedResult = JSON.parse(cleanJson);
+          
+          // Extract video URL from resultUrls array
+          if (parsedResult.resultUrls && Array.isArray(parsedResult.resultUrls) && parsedResult.resultUrls.length > 0) {
+            videoUrl = parsedResult.resultUrls[0].replace(/`/g, '').trim();
+
+          }
+        } catch (e) {
+
+        }
+      }
+      
+      // Prepare the formatted response for frontend
+      formattedData = {
+        taskId: n8nData.taskId,
+        model: n8nData.model,
+        state: n8nData.state,
+        videoUrl: videoUrl,
+        costTime: n8nData.costTime,
+        completeTime: n8nData.completeTime,
+        createTime: n8nData.createTime
+      };
+    } else {
+      // Handle other response formats (legacy support)
+
+      
+      // If resultJson is a string, try to parse it
+      if (formattedData.resultJson && typeof formattedData.resultJson === 'string') {
+        try {
+          const cleanJson = formattedData.resultJson.replace(/`/g, '');
+          formattedData.resultJson = JSON.parse(cleanJson);
+        } catch (e) {
+
+        }
+      }
+      
+      // Extract video URL from various possible locations
+      if (formattedData.resultJson && formattedData.resultJson.videoUrl) {
+        videoUrl = formattedData.resultJson.videoUrl.replace(/`/g, '').trim();
+      } else if (formattedData.resultJson && formattedData.resultJson.resultUrls && Array.isArray(formattedData.resultJson.resultUrls)) {
+        videoUrl = formattedData.resultJson.resultUrls[0].replace(/`/g, '').trim();
+      } else if (formattedData.videoUrl) {
+        videoUrl = formattedData.videoUrl.replace(/`/g, '').trim();
+      } else if (formattedData.data && formattedData.data.videoUrl) {
+        videoUrl = formattedData.data.videoUrl.replace(/`/g, '').trim();
+      }
+    }
+    
+    if (!videoUrl) {
+
+
+    } else {
+
+    }
+    
+    // Prepare the response data for frontend
+    responseData = {
+      status: 'success',
+      data: {
+        ...formattedData,
+        videoUrl: videoUrl
+      }
+    };
+    
+    // Deduct credit and update user stats
+    user.credits.balance -= 1;
+    user.credits.totalUsed += 1;
+    
+    // Save generated video to user's history if we have a valid URL
+    if (videoUrl && videoUrl !== 'No result URL found') {
+      // Check if generatedVideos array exists, if not create it
+      if (!user.generatedVideos) {
+        user.generatedVideos = [];
+      }
+      
+      const videoData = {
+        id: `vid_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        originalUrl: image_url,
+        audioUrl: audio_url,
+        videoUrl: videoUrl,
+        prompt: prompt,
+        type: 'audio-to-video',
+        taskId: formattedData.taskId || null,
+        createdAt: new Date()
+      };
+      
+      // Add to user's generated videos array
+      user.generatedVideos.push(videoData);
+      
+      // Keep only last 50 videos to prevent database bloat
+      if (user.generatedVideos.length > 50) {
+        user.generatedVideos = user.generatedVideos.slice(-50);
+      }
+    }
+     
+    await user.save();
+    
+    // Add credit info to response
+    responseData.credits = {
+      remaining: user.credits.balance
+    };
+    
+    // Return the formatted response
+    return res.json(responseData);
+
+  } catch (err) {
+
+
+    
+    // Check if it's a timeout error
+    if (err.code === 'ECONNABORTED') {
+
+      return res.status(504).json({
+        status: 'fail',
+        error: 'N8N webhook request timed out. The video processing is taking too long.'
+      });
+    }
+    
+    // Check if it's a connection error
+    if (err.code === 'ECONNREFUSED') {
+
+      return res.status(502).json({
+        status: 'fail',
+        error: 'N8N webhook connection refused. The service might be down.'
+      });
+    }
+    
+    // Handle 404 errors specifically for n8n webhook
+    if (err.response?.status === 404) {
+
+      return res.status(502).json({
+        status: 'fail',
+        error: 'Video processing service is currently unavailable. Please try again later or contact support.',
+        hint: 'The n8n workflow may need to be activated. Please ensure the workflow is running.'
+      });
+    }
+    
+    // Provide more detailed error message
+    const errorMessage = err.response?.data?.error || 
+                         err.response?.statusText || 
+                         err.message || 
+                         'Failed to process video';
+    
+    const statusCode = err.response?.status || 500;
+    
+    return res.status(statusCode).json({ 
+      status: 'fail',
+      error: errorMessage,
+      details: err.response?.data || null 
+    });
+  }
+};
